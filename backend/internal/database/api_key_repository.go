@@ -1,4 +1,3 @@
-
 package database
 
 import (
@@ -37,9 +36,25 @@ func (r *APIKeyRepository) SaveAPIKey(
 
 	err := r.db.QueryRow(
 		ctx,
-		`INSERT INTO api_keys (user_id, provider, encrypted_key, active)
-		 VALUES ($1, $2, $3, TRUE)
-		 RETURNING id, user_id, provider, encrypted_key, active, created_at`,
+		`INSERT INTO api_keys (
+			user_id,
+			provider,
+			encrypted_key,
+			active
+		)
+		VALUES ($1, $2, $3, TRUE)
+		ON CONFLICT (user_id, provider)
+		DO UPDATE SET
+			encrypted_key = EXCLUDED.encrypted_key,
+			active = TRUE,
+			created_at = now()
+		RETURNING
+			id,
+			user_id,
+			provider,
+			encrypted_key,
+			active,
+			created_at`,
 		userID,
 		provider,
 		encryptedKey,
@@ -68,13 +83,18 @@ func (r *APIKeyRepository) GetAPIKeyByUser(
 
 	err := r.db.QueryRow(
 		ctx,
-		`SELECT id, user_id, provider, encrypted_key, active, created_at
-		 FROM api_keys
-		 WHERE user_id = $1
-		   AND provider = $2
-		   AND active = TRUE
-		 ORDER BY created_at DESC
-		 LIMIT 1`,
+		`SELECT
+			id,
+			user_id,
+			provider,
+			encrypted_key,
+			active,
+			created_at
+		FROM api_keys
+		WHERE user_id = $1
+		  AND provider = $2
+		  AND active = TRUE
+		LIMIT 1`,
 		userID,
 		provider,
 	).Scan(
@@ -92,4 +112,3 @@ func (r *APIKeyRepository) GetAPIKeyByUser(
 
 	return apiKey, nil
 }
-
