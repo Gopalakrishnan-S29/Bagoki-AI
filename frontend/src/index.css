@@ -1,0 +1,46 @@
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+html {
+  background: #101113;
+}
+
+body {
+  min-width: 320px;
+
+  background: #101113;
+
+  color: #f2f1ed;
+
+  font-family:
+    Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+textarea {
+  font-family: inherit;
+}
+
+button:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(121, 185, 255, 0.65);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: rgba(121, 185, 255, 0.22);
+  color: #ffffff;
+}

@@ -6,39 +6,179 @@ import "strings"
 type TaskType string
 
 const (
+	TaskConversation  TaskType = "conversation"
 	TaskCoding        TaskType = "coding"
 	TaskCybersecurity TaskType = "cybersecurity"
 	TaskTranslation   TaskType = "translation"
 	TaskMath          TaskType = "mathematics"
 	TaskWriting       TaskType = "writing"
+	TaskSummarization TaskType = "summarization"
+	TaskComparison    TaskType = "comparison"
+	TaskReasoning     TaskType = "reasoning"
+	TaskImage         TaskType = "image_generation"
 	TaskGeneral       TaskType = "general"
 )
 
-// PromptAnalysis is the result of classifying a prompt, used by the
-// decision engine to select a model and risk tier.
+// PromptAnalysis is the result of classifying a prompt.
 type PromptAnalysis struct {
 	TaskType   TaskType
-	Complexity string // "low" | "medium" | "high"
-	RiskTier   string // "low" | "medium" | "high" - see decision.go
+	Complexity string // low | medium | high
+	RiskTier   string // low | medium | high
 }
 
-// keyword sets used for v1 rule-based classification.
-// This is intentionally simple to start; swap in an ML/embedding
-// classifier later without changing the interface below.
-var codingKeywords = []string{"code", "function", "bug", "python", "javascript", "compile", "api", "script", "debug"}
-var securityKeywords = []string{"vulnerability", "exploit", "malware", "hack", "cve", "penetration", "firewall", "attack", "sql injection", "xss", "phishing"}
-var translationKeywords = []string{"translate", "translation", "in french", "in tamil", "in hindi", "in spanish"}
-var mathKeywords = []string{"solve", "calculate", "equation", "integral", "derivative", "sum of"}
-var writingKeywords = []string{"write an essay", "blog post", "write a letter", "write a story", "poem"}
+var codingKeywords = []string{
+	"code",
+	"coding",
+	"function",
+	"program",
+	"python",
+	"javascript",
+	"typescript",
+	"golang",
+	"go program",
+	"java",
+	"c++",
+	"compile",
+	"api",
+	"script",
+	"debug",
+	"debugging",
+	"bug",
+	"algorithm",
+	"developer",
+}
 
-// AnalyzePrompt classifies a raw prompt into a TaskType and a rough
-// complexity estimate. v1 uses keyword matching; this is the seam
-// where a trained classifier can be swapped in later.
+var securityKeywords = []string{
+	"cybersecurity",
+	"cyber security",
+	"security",
+	"vulnerability",
+	"vulnerabilities",
+	"exploit",
+	"malware",
+	"hack",
+	"hacking",
+	"cve",
+	"penetration testing",
+	"pentest",
+	"firewall",
+	"attack",
+	"sql injection",
+	"xss",
+	"cross site scripting",
+	"csrf",
+	"idor",
+	"phishing",
+	"owasp",
+	"jwt security",
+	"authentication security",
+}
+
+var translationKeywords = []string{
+	"translate",
+	"translation",
+	"translate this",
+	"in french",
+	"in tamil",
+	"in hindi",
+	"in spanish",
+	"in german",
+}
+
+var mathKeywords = []string{
+	"calculate",
+	"calculation",
+	"solve",
+	"equation",
+	"integral",
+	"derivative",
+	"mathematics",
+	"math",
+	"percentage",
+	"probability",
+	"multiply",
+	"divide",
+	"addition",
+	"subtraction",
+}
+
+var writingKeywords = []string{
+	"write",
+	"writing",
+	"email",
+	"e-mail",
+	"letter",
+	"essay",
+	"blog post",
+	"story",
+	"poem",
+	"speech",
+	"resume",
+	"cover letter",
+	"application",
+	"rewrite",
+	"professional message",
+}
+
+var summarizationKeywords = []string{
+	"summarize",
+	"summarise",
+	"summary",
+	"summarization",
+	"key points",
+	"brief summary",
+	"shorten this",
+	"give me the main points",
+}
+
+var comparisonKeywords = []string{
+	"compare",
+	"comparison",
+	"difference between",
+	"differences between",
+	"versus",
+	" vs ",
+	"which is better",
+	"pros and cons",
+}
+
+var reasoningKeywords = []string{
+	"analyze",
+	"analyse",
+	"deep analysis",
+	"deeply",
+	"architecture",
+	"design a system",
+	"system design",
+	"strategy",
+	"reason",
+	"reasoning",
+	"complex problem",
+	"step by step",
+	"evaluate",
+}
+
+var imageKeywords = []string{
+	"create an image",
+	"generate an image",
+	"generate image",
+	"make an image",
+	"create a picture",
+	"generate a picture",
+	"draw an image",
+	"draw a picture",
+	"image of",
+	"picture of",
+	"illustration of",
+	"logo design",
+}
+
+// AnalyzePrompt classifies a raw prompt.
 func AnalyzePrompt(prompt string) PromptAnalysis {
-	lower := strings.ToLower(prompt)
+	lower := strings.ToLower(strings.TrimSpace(prompt))
 
 	task := classify(lower)
-	complexity := estimateComplexity(prompt)
+	complexity := estimateComplexity(prompt, task)
 	risk := assessRiskTier(task, lower)
 
 	return PromptAnalysis{
@@ -50,16 +190,36 @@ func AnalyzePrompt(prompt string) PromptAnalysis {
 
 func classify(lower string) TaskType {
 	switch {
+	case containsAny(lower, imageKeywords):
+		return TaskImage
+
 	case containsAny(lower, securityKeywords):
 		return TaskCybersecurity
+
 	case containsAny(lower, codingKeywords):
 		return TaskCoding
+
 	case containsAny(lower, translationKeywords):
 		return TaskTranslation
+
 	case containsAny(lower, mathKeywords):
 		return TaskMath
+
+	case containsAny(lower, summarizationKeywords):
+		return TaskSummarization
+
+	case containsAny(lower, comparisonKeywords):
+		return TaskComparison
+
+	case containsAny(lower, reasoningKeywords):
+		return TaskReasoning
+
 	case containsAny(lower, writingKeywords):
 		return TaskWriting
+
+	case isConversation(lower):
+		return TaskConversation
+
 	default:
 		return TaskGeneral
 	}
@@ -71,40 +231,77 @@ func containsAny(text string, keywords []string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
-// estimateComplexity uses prompt length as a rough proxy for v1.
-// NOTE: length alone is a weak signal (see project notes) - this is
-// a placeholder until reasoning-requirement detection is added.
-func estimateComplexity(prompt string) string {
-	wordCount := len(strings.Fields(prompt))
-	switch {
-	case wordCount > 80:
-		return "high"
-	case wordCount > 25:
-		return "medium"
-	default:
-		return "low"
+func isConversation(lower string) bool {
+	conversationKeywords := []string{
+		"hi",
+		"hello",
+		"hey",
+		"good morning",
+		"good afternoon",
+		"good evening",
+		"how are you",
+		"who are you",
+		"what can you do",
+		"thanks",
+		"thank you",
+		"goodbye",
+		"bye",
 	}
+
+	return containsAny(lower, conversationKeywords)
 }
 
-// assessRiskTier flags prompts that may warrant constrained execution
-// (no autonomous tool use, human review) rather than just picking a
-// capable model. Cybersecurity/agentic-sounding prompts default to a
-// higher tier - inspired by real incidents where permissive execution
-// of security-related agent tasks caused unintended behaviour.
+// estimateComplexity combines prompt length with task type.
+func estimateComplexity(prompt string, task TaskType) string {
+	wordCount := len(strings.Fields(prompt))
+
+	if task == TaskReasoning {
+		return "high"
+	}
+
+	if task == TaskCybersecurity && wordCount > 15 {
+		return "high"
+	}
+
+	if task == TaskCoding && wordCount > 20 {
+		return "high"
+	}
+
+	if wordCount > 80 {
+		return "high"
+	}
+
+	if wordCount > 25 {
+		return "medium"
+	}
+
+	return "low"
+}
+
 func assessRiskTier(task TaskType, lower string) string {
-	agenticSignals := []string{"autonomously", "without asking", "run this on", "execute on the internet", "access the internet"}
+	agenticSignals := []string{
+		"autonomously",
+		"without asking",
+		"run this on",
+		"execute on the internet",
+		"access the internet",
+	}
 
 	if task == TaskCybersecurity {
 		return "high"
 	}
+
 	if containsAny(lower, agenticSignals) {
 		return "high"
 	}
+
 	if task == TaskCoding {
 		return "medium"
 	}
+
 	return "low"
 }

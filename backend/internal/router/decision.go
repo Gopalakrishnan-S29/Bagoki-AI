@@ -1,66 +1,105 @@
 package router
 
-// ModelChoice is the routing decision returned to the caller: which
-// provider/model to call, and how much autonomy to allow it.
+// ModelChoice is the routing decision returned to the caller.
 type ModelChoice struct {
-	Provider   string
-	Model      string
-	Reason     string
-	RiskTier   string
+	Provider string
+	Model    string
+	Reason   string
+	RiskTier string
 }
 
-// routingTable maps task type to a preferred provider+model.
-// This mirrors the "Example Routing Rules" table from the project plan.
-// Extend or replace with a learned/adaptive router later.
+// routingTable maps task types to preferred OpenAI models.
+//
+// For the current demo we use OpenAI as the only provider,
+// but Bagoki demonstrates different model-selection decisions.
 var routingTable = map[TaskType]ModelChoice{
-	TaskCoding: {
-    Provider: "openai",
-    Model:    "gpt-4.1-mini",
-    Reason:   "Fast and capable for coding tasks",
-},
-	TaskCybersecurity: {
+
+	TaskConversation: {
 		Provider: "openai",
 		Model:    "gpt-4.1-mini",
-		Reason:   "Fast and capable for cybersecurity tasks",
+		Reason:   "Fast and efficient for simple conversations",
 	},
-	TaskTranslation: {
-		Provider: "openai",
-		Model:    "gpt-4.1-mini",
-		Reason:   "Fast and inexpensive for language tasks",
-	},
-	TaskMath: {
-		Provider: "openai",
-		Model:    "gpt-5",
-		Reason:   "Reliable multi-step reasoning",
-	},
-	TaskWriting: {
-		Provider: "openai",
-		Model:    "gpt-5",
-		Reason:   "Strong creative and long-form writing",
-	},
+
 	TaskGeneral: {
 		Provider: "openai",
 		Model:    "gpt-4.1-mini",
-		Reason:   "Fast, cheap default for simple queries",
+		Reason:   "Fast model for general questions",
+	},
+
+	TaskWriting: {
+		Provider: "openai",
+		Model:    "gpt-4.1-mini",
+		Reason:   "Efficient model for emails, letters and general writing",
+	},
+
+	TaskTranslation: {
+		Provider: "openai",
+		Model:    "gpt-4.1-mini",
+		Reason:   "Fast model suitable for translation tasks",
+	},
+
+	TaskSummarization: {
+		Provider: "openai",
+		Model:    "gpt-4.1-mini",
+		Reason:   "Efficient model for summarization",
+	},
+
+	TaskCoding: {
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		Reason:   "Stronger model selected for programming tasks",
+	},
+
+	TaskCybersecurity: {
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		Reason:   "Stronger reasoning capability for cybersecurity analysis",
+	},
+
+	TaskMath: {
+		Provider: "openai",
+		Model:    "gpt-5",
+		Reason:   "Stronger reasoning capability for mathematical problems",
+	},
+
+	TaskComparison: {
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		Reason:   "Strong model for structured comparison and analysis",
+	},
+
+	TaskReasoning: {
+		Provider: "openai",
+		Model:    "gpt-5",
+		Reason:   "Advanced reasoning model for complex analysis",
+	},
+
+	TaskImage: {
+		Provider: "openai",
+		Model:    "gpt-4.1",
+		Reason:   "Image-generation requests require an image-capable workflow",
 	},
 }
 
-// Decide applies the routing table to a PromptAnalysis and returns the
-// chosen provider/model. It also carries the assessed risk tier so the
-// execution layer can decide how much autonomy/tool access to grant.
+// Decide applies the routing table to a PromptAnalysis.
 func Decide(analysis PromptAnalysis) ModelChoice {
+
 	choice, ok := routingTable[analysis.TaskType]
+
 	if !ok {
 		choice = routingTable[TaskGeneral]
 	}
 
-	// Escalate to a stronger model when complexity is high, regardless
-	// of task type - a simple v1 cost/capability tradeoff.
-	if analysis.Complexity == "high" && choice.Provider == "openai" && choice.Model == "gpt-4.1-mini" {
+	// Escalate simple models for high-complexity requests.
+	if analysis.Complexity == "high" &&
+		choice.Provider == "openai" &&
+		choice.Model == "gpt-4.1-mini" {
+
 		choice.Model = "gpt-5"
 		choice.Reason += " (escalated: high complexity)"
 	}
 
 	choice.RiskTier = analysis.RiskTier
+
 	return choice
 }

@@ -25,6 +25,7 @@ type chatResponse struct {
 	Provider   string `json:"provider"`
 	Model      string `json:"model"`
 	TaskType   string `json:"task_type"`
+	Complexity string `json:"complexity"`
 	RiskTier   string `json:"risk_tier"`
 	Reason     string `json:"reason"`
 	TokensUsed int    `json:"tokens_used"`
@@ -32,14 +33,19 @@ type chatResponse struct {
 }
 
 func main() {
-	// Load environment variables from .env.
+
+	// =========================================================
+	// Environment
+	// =========================================================
+
 	if err := godotenv.Load(); err != nil {
-		log.Println(
-			"warning: .env file not found, using environment variables",
-		)
+		log.Println("warning: .env file not found, using environment variables")
 	}
 
-	// Connect to Neon PostgreSQL.
+	// =========================================================
+	// Database
+	// =========================================================
+
 	ctx := context.Background()
 
 	db, err := database.Connect(ctx)
@@ -50,20 +56,22 @@ func main() {
 
 	log.Println("connected to Neon PostgreSQL")
 
-	// Initialize repositories.
 	userRepository := database.NewUserRepository(db)
 	apiKeyRepository := database.NewAPIKeyRepository(db)
 
-	// Initialize JWT manager.
+	// =========================================================
+	// Authentication
+	// =========================================================
+
 	tokenManager, err := auth.NewTokenManager()
 	if err != nil {
-		log.Fatal(
-			"authentication initialization failed: ",
-			err,
-		)
+		log.Fatal("authentication initialization failed: ", err)
 	}
 
-	// Initialize Key Vault.
+	// =========================================================
+	// Key Vault
+	// =========================================================
+
 	masterEncryptionKey := os.Getenv("MASTER_ENCRYPTION_KEY")
 
 	if masterEncryptionKey == "" {
@@ -72,64 +80,82 @@ func main() {
 
 	vault, err := keyvault.New(masterEncryptionKey)
 	if err != nil {
-		log.Fatal(
-			"key vault initialization failed: ",
-			err,
-		)
+		log.Fatal("key vault initialization failed: ", err)
 	}
 
-	// Initialize API key service.
 	apiKeyService := keyvault.NewAPIKeyService(
 		apiKeyRepository,
 		vault,
 	)
 
-	// Initialize API key handler.
 	apiKeyHandler := keyvault.NewAPIKeyHandler(
 		apiKeyService,
 	)
 
-	// Initialize authentication handler.
 	authHandler := auth.NewAuthHandler(
 		userRepository,
 		tokenManager,
 	)
 
-	// Initialize provider registry.
+	// =========================================================
+	// Provider Registry
+	//
+	// Ollama is the actual response provider.
+	// OpenAI is registered only because the project keeps
+	// the provider architecture ready for future expansion.
+	// =========================================================
+
 	registry := providers.NewRegistry()
 
 	registry.Register(
 		providers.NewOpenAIProvider(),
 	)
 
-	// Add additional providers here later.
-	// registry.Register(providers.NewAnthropicProvider())
-
-	mux := http.NewServeMux()
-
-	// =========================================================
-	// Health endpoint
-	// =========================================================
-
-	mux.HandleFunc(
-		"/health",
-		func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodGet {
-				http.Error(
-					w,
-					"method not allowed",
-					http.StatusMethodNotAllowed,
-				)
-				return
-			}
-
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("ok"))
-		},
+	registry.Register(
+		providers.NewOllamaProvider(),
 	)
 
 	// =========================================================
-	// Authentication endpoints
+	// Ollama Decision Engine
+	// =========================================================
+
+	ollamaDecisionEngine := router.NewOllamaDecisionEngine()
+
+	log.Println("Ollama decision engine initialized")
+
+	// =========================================================
+	// HTTP Router
+	// =========================================================
+
+	mux := http.NewServeMux()
+
+	// Serve frontend files.
+	mux.Handle(
+		"/",
+		http.FileServer(http.Dir("../frontend")),
+	)
+
+	// =========================================================
+	// Health
+	// =========================================================
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+
+		if r.Method != http.MethodGet {
+			http.Error(
+				w,
+				"method not allowed",
+				http.StatusMethodNotAllowed,
+			)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	// =========================================================
+	// Authentication
 	// =========================================================
 
 	mux.HandleFunc(
@@ -143,7 +169,7 @@ func main() {
 	)
 
 	// =========================================================
-	// Protected API-key endpoint
+	// API Keys
 	// =========================================================
 
 	mux.Handle(
@@ -154,194 +180,215 @@ func main() {
 	)
 
 	// =========================================================
-	// Protected Chat endpoint
+	// AI ROUTER CHAT
+	//
+	// Current architecture:
+	//
+	// User Prompt
+	//      ↓
+	// Ollama Decision Engine
+	//      ↓
+	// Task / Complexity / Model Decision
+	//      ↓
+	// Ollama Provider
+	//      ↓
+	// Actual Response
+	//
+	// No image generation.
+	// No OpenAI API call for the actual response.
 	// =========================================================
 
-	chatHandler := http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) {
+	chatHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
-			if r.Method != http.MethodPost {
-				http.Error(
-					w,
-					"method not allowed",
-					http.StatusMethodNotAllowed,
-				)
-				return
-			}
-
-			var req chatRequest
-
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				http.Error(
-					w,
-					"invalid request body",
-					http.StatusBadRequest,
-				)
-				return
-			}
-
-			if req.Prompt == "" {
-				http.Error(
-					w,
-					"prompt is required",
-					http.StatusBadRequest,
-				)
-				return
-			}
-
-			// Get authenticated user ID from JWT middleware.
-			userID, ok := auth.UserIDFromContext(
-				r.Context(),
+		if r.Method != http.MethodPost {
+			http.Error(
+				w,
+				"method not allowed",
+				http.StatusMethodNotAllowed,
 			)
+			return
+		}
 
-			if !ok {
-				http.Error(
-					w,
-					"authenticated user not found",
-					http.StatusUnauthorized,
-				)
-				return
-			}
+		var req chatRequest
 
-			log.Printf(
-				"chat request from authenticated user: %s",
-				userID,
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(
+				w,
+				"invalid request body",
+				http.StatusBadRequest,
 			)
+			return
+		}
 
-			// -------------------------------------------------
-			// 1. Analyze the prompt.
-			// -------------------------------------------------
-
-			analysis := router.AnalyzePrompt(
-				req.Prompt,
+		if req.Prompt == "" {
+			http.Error(
+				w,
+				"prompt is required",
+				http.StatusBadRequest,
 			)
+			return
+		}
 
-			// -------------------------------------------------
-			// 2. Decide provider and model.
-			// -------------------------------------------------
+		// =====================================================
+		// STEP 1 — OLLAMA ROUTING DECISION
+		// =====================================================
 
-			choice := router.Decide(
-				analysis,
+		decisionCtx, cancel := context.WithTimeout(
+			r.Context(),
+			60*time.Second,
+		)
+		defer cancel()
+
+		decision, err := ollamaDecisionEngine.Decide(
+			decisionCtx,
+			req.Prompt,
+		)
+
+		if err != nil {
+			http.Error(
+				w,
+				"routing decision failed: "+err.Error(),
+				http.StatusBadGateway,
 			)
+			return
+		}
 
-			// -------------------------------------------------
-			// 3. Find provider adapter.
-			// -------------------------------------------------
+		log.Printf(
+			"ROUTING | task=%s | complexity=%s | provider=%s | model=%s",
+			decision.TaskType,
+			decision.Complexity,
+			decision.Provider,
+			decision.Model,
+		)
 
-			provider, ok := registry.Get(
-				choice.Provider,
+		// =====================================================
+		// STEP 2 — GET SELECTED PROVIDER
+		// =====================================================
+
+		provider, ok := registry.Get(
+			decision.Provider,
+		)
+
+		if !ok {
+			http.Error(
+				w,
+				"provider not available: "+decision.Provider,
+				http.StatusInternalServerError,
 			)
+			return
+		}
 
-			if !ok {
-				http.Error(
-					w,
-					"provider not available: "+choice.Provider,
-					http.StatusInternalServerError,
-				)
-				return
-			}
+		// =====================================================
+		// STEP 3 — CURRENT DEMO ARCHITECTURE
+		//
+		// The actual answer is generated by Ollama.
+		//
+		// Even if the decision engine mentions an OpenAI model,
+		// we do not call OpenAI for the current demo.
+		// =====================================================
 
-			// -------------------------------------------------
-			// 4. Retrieve user's encrypted API key.
-			//    APIKeyService decrypts it only in memory.
-			// -------------------------------------------------
+		ollamaProvider, ok := provider.(*providers.OllamaProvider)
 
-			apiKey, err := apiKeyService.GetAPIKey(
-				r.Context(),
-				userID,
-				choice.Provider,
+		if !ok {
+			http.Error(
+				w,
+				"current demo requires Ollama as the response provider",
+				http.StatusInternalServerError,
 			)
+			return
+		}
 
-			if err != nil {
-				log.Printf(
-					"failed to retrieve API key for user %s and provider %s: %v",
-					userID,
-					choice.Provider,
-					err,
-				)
+		providerCtx, cancelProvider := context.WithTimeout(
+			r.Context(),
+			120*time.Second,
+		)
+		defer cancelProvider()
 
-				http.Error(
-					w,
-					"provider API key is not configured",
-					http.StatusBadRequest,
-				)
-				return
-			}
+		result, err := ollamaProvider.CallModel(
+			providerCtx,
+			"",
+			decision.Model,
+			req.Prompt,
+		)
 
-			// -------------------------------------------------
-			// 5. Call selected provider.
-			// -------------------------------------------------
-
-			providerCtx, cancel := context.WithTimeout(
-				r.Context(),
-				60*time.Second,
+		if err != nil {
+			http.Error(
+				w,
+				"ollama response failed: "+err.Error(),
+				http.StatusBadGateway,
 			)
-			defer cancel()
+			return
+		}
 
-			result, err := provider.CallModel(
-				providerCtx,
-				apiKey,
-				choice.Model,
-				req.Prompt,
-			)
+		// =====================================================
+		// STEP 4 — RESPONSE
+		// =====================================================
 
-			if err != nil {
-				http.Error(
-					w,
-					"provider call failed: "+err.Error(),
-					http.StatusBadGateway,
-				)
-				return
-			}
+		resp := chatResponse{
+			Reply:      result.Content,
+			Provider:   "ollama",
+			Model:      decision.Model,
+			TaskType:   decision.TaskType,
+			Complexity: decision.Complexity,
+			RiskTier:   "",
+			Reason:     decision.Reason,
+			TokensUsed: result.TokensUsed,
+			LatencyMs:  result.LatencyMs,
+		}
 
-			// -------------------------------------------------
-			// 6. Build normalized response.
-			// -------------------------------------------------
+		w.Header().Set(
+			"Content-Type",
+			"application/json",
+		)
 
-			resp := chatResponse{
-				Reply:      result.Content,
-				Provider:   choice.Provider,
-				Model:      choice.Model,
-				TaskType:   string(analysis.TaskType),
-				RiskTier:   choice.RiskTier,
-				Reason:     choice.Reason,
-				TokensUsed: result.TokensUsed,
-				LatencyMs:  result.LatencyMs,
-			}
+		w.WriteHeader(http.StatusOK)
 
-			w.Header().Set(
-				"Content-Type",
-				"application/json",
-			)
+		_ = json.NewEncoder(w).Encode(resp)
+	})
 
-			if err := json.NewEncoder(w).Encode(resp); err != nil {
-				log.Printf(
-					"failed to encode chat response: %v",
-					err,
-				)
-			}
-		},
-	)
-
-	// Require JWT authentication for /api/chat.
 	mux.Handle(
-		"/api/chat",
-		tokenManager.Middleware(
-			chatHandler,
-		),
+		"/api/router/chat",
+		chatHandler,
 	)
 
 	// =========================================================
-	// Start server
+	// CORS
 	// =========================================================
 
-	log.Println(
-		"ai-router backend listening on :8080",
-	)
+	corsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		w.Header().Set(
+			"Access-Control-Allow-Origin",
+			"*",
+		)
+
+		w.Header().Set(
+			"Access-Control-Allow-Methods",
+			"GET, POST, PUT, DELETE, OPTIONS",
+		)
+
+		w.Header().Set(
+			"Access-Control-Allow-Headers",
+			"Content-Type, Authorization",
+		)
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		mux.ServeHTTP(w, r)
+	})
+
+	// =========================================================
+	// START SERVER
+	// =========================================================
+
+	log.Println("ai-router backend listening on :8080")
 
 	if err := http.ListenAndServe(
 		":8080",
-		mux,
+		corsHandler,
 	); err != nil {
 		log.Fatal(err)
 	}
